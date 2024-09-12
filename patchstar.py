@@ -64,6 +64,7 @@ class Patchstar:
         self.tip_coord_angle = []
         self.tip_coord_xy = []
         self.tip_coord_z = []
+        self.low_mag_water_z_coord = []
 
     def description(self):
         return "Micromanipulator"    
@@ -923,3 +924,25 @@ class Patchstar:
 
         print(f"A creep distance = {int(distance)}")
         print(f"A creep speed = {int(speed)}")
+
+    def set_top_speed(self, speed):
+
+        #speed in microns/second. 
+
+        speed = abs(speed)
+
+        if speed > 4000:  #Keep max speed limit to 4000 to protect Patchstars. 
+            speed = 4000
+
+        #Set top speed for Slicescope and patchstars.
+        command = f"TOP {speed}\r"
+
+        #Max speed limit is 4000 
+        self.ser.write(command.encode('utf-8'))
+        byte_to_string = self.ser.read_until(b'\r').decode('utf-8')
+
+    def check_top_speed(self):
+
+        self.ser.write(b'TOP\r')
+        byte_to_string = self.ser.read_until(b'\r').decode('utf-8')
+        print(f'Check patchstar top speed = {byte_to_string}')

@@ -48,6 +48,9 @@ class Slicescope:
         self.z_tip = []
         self.high_mag_z_max = 2230_00
         self.high_mag_z_min = 0
+        self.low_mag_water_z_coord = []
+        self.cell_z_coord = []
+        self.cell_z_coord_margin = 400_00
 
     def description(self):
         return "Slicescope"
@@ -648,3 +651,24 @@ class Slicescope:
 
         print(f"Z creep distance = {int(distance)}")
         print(f"Z creep speed = {int(speed)}")
+
+    def set_top_speed(self, speed):
+
+        #speed in microns/second. 
+
+        speed = abs(speed)
+
+        if speed > 4000:  #Keep max speed limit to 4000 to protect Patchstars. 
+            speed = 4000
+
+        #Set top speed for Slicescope and patchstars.
+        command = f"TOP {speed}\r"
+
+        self.ser.write(command.encode('utf-8'))  #6000 is ok but better to use 4000. May be too fast for servos.
+        byte_to_string = self.ser.read_until(b'\r').decode('utf-8')
+
+    def check_top_speed(self):
+
+        self.ser.write(b'TOP\r')
+        byte_to_string = self.ser.read_until(b'\r').decode('utf-8')
+        print(f'Check slicescope top speed = {byte_to_string}')
