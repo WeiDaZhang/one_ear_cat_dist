@@ -77,14 +77,18 @@ class SP:
         self.gui_img_stack = []
         self.gui_patchstar_coordinates = []
         self.gui_slicescope_coordinates = []
+        self.gui_img_burst_interval = 50    #milliseconds
 
         self.live_flag = False
 
         self.target_list = []
 
         self.mouse_click_coord = {"x": None, "y": None, "update": False}
+        self.b_coordinate_reset = False
+        self.low_mag_cal_exp_time = 6
+        self.high_mag_cal_exp_time = 10
 
-    def initialize(self, port_list=['COM4', 'COM5', 'COM8', 'COM9']):
+    def initialize(self, port_list=['COM3', 'COM4', 'COM7', 'COM8']):
         #   port_list   string list     port_list[0] is the port for slicescope
         #                               port_list[1] is the port for condenser
         #                               port_list[2:end] are ports for patchstars
@@ -110,15 +114,36 @@ class SP:
         self.heka = Heka()
         self.batch = Batch()
         config_lu = LiveUpdateConfig()
+        config_lu.cross = True
         config_lu.sls_flag = False
         config_lu.pts_flags = [False]*self.patchstar_num
+        config_lu.show_result = False
         start_live_update(self, config_lu)
-        #start_live_update(self, sls_flag=False, pts_flags=False)
+        if self.b_coordinate_reset:
+            self.global_coordinate_reset()
 
+        for idx in range(self.patchstar_num):
+            #Move probe away in the max x and z directions
+            self.patchstar_list[idx].moveAbsolute(  self.patchstar_list[idx].x_max,
+                                                        self.patchstar_list[idx].y_origin,
+                                                        self.patchstar_list[idx].z_max)
 
-    def configure(self):
+    def configure(self, **kwargs):
+        for input_attr in kwargs:
+            if hasattr(self, input_attr):
+                setattr(self, input_attr, kwargs[input_attr])
+                print("Parameter {} set to {}".format(input_attr, kwargs[input_attr]))
+            else:
+                print("Parameter {} does not exist, setting ignored".format(input_attr))
+
+    def global_coordinate_reset(self):
 
         end_live_update(self)
+        config_lu = LiveUpdateConfig()
+        config_lu.sls_flag = False
+        config_lu.pts_flags = [False]*self.patchstar_num
+        config_lu.show_result = False
+        start_live_update(self, config_lu)
 
         #Move condenser out of the way
         self.condenser.moveRelative(self.condenser.z_origin,100000_00)
@@ -244,7 +269,7 @@ class SP:
             self.patchstar_list[idx].moveAbsolute(self.patchstar_list[idx].x_max, self.patchstar_list[idx].y_origin,self.patchstar_list[idx].z_max)
 
 
-    def probe_adjustment(self):
+    def manual_probe_adjustment(self):
         end_live_update(self)
 
         self.slicescope.moveAbsolute(self.slicescope.x_origin,self.slicescope.y_origin,self.slicescope.z_origin)
@@ -284,6 +309,98 @@ class SP:
         #Prompt user to prepare sample
         input('Press ENTER to continue. Please prepare sample.')
 
+    def pre_probe_adjustment(self):
+        end_live_update(self)
+        config_lu = LiveUpdateConfig()
+        config_lu.sls_flag = False
+        config_lu.pts_flags = [False]*self.patchstar_num
+        config_lu.show_result = False
+        start_live_update(self, config_lu)
+
+        self.slicescope.moveAbsolute(self.slicescope.x_origin,self.slicescope.y_origin,self.slicescope.z_origin)
+        #Save coordinates for each probe
+        #Update the slicescope x,y,z coordinates for each patchstar
+        self.slicescope.coordinates()
+        for idx in range(self.patchstar_num):
+            self.patchstar_list_slicescope_coordinates[idx] = [self.slicescope.x, self.slicescope.y, self.slicescope.z]
+
+        #Move condenser away from origin position
+        self.condenser.moveAbsolute(self.condenser.z_max)
+
+        end_live_update(self)
+        config_lu = LiveUpdateConfig()
+        config_lu.sls_flag = True
+        config_lu.pts_flags = [True]*self.patchstar_num
+        config_lu.show_result = False
+        start_live_update(self, config_lu)
+
+    def probe_adjustment(self):
+        end_live_update(self)
+        config_lu = LiveUpdateConfig()
+        config_lu.sls_flag = False
+        config_lu.pts_flags = [False]*self.patchstar_num
+        config_lu.show_result = True
+        start_live_update(self, config_lu)
+
+        #Update each patchstar x,y,z,a coordinates
+        patchstar_distances = []
+        for idx in range(self.patchstar_num):
+            patchstar_pointstack = PointStack([])
+            self.patchstar_list[idx].coordinates()
+            patchstar_pointstack.append(Point([ self.patchstar_list[idx].x,
+                                                self.patchstar_list[idx].y,
+                                                self.patchstar_list[idx].z]))
+            patchstar_pointstack.append(Point([ self.patchstar_list[idx].x_max,
+                                                self.patchstar_list[idx].y_origin,
+                                                self.patchstar_list[idx].z_max]))
+            patchstar_distances.append(patchstar_pointstack.distance()[0,1])
+
+        max_moved_idx = np.argmax(patchstar_distances)
+        if patchstar_distances[idx] == 0:
+            end_live_update(self)
+            config_lu = LiveUpdateConfig()
+            config_lu.sls_flag = True
+            config_lu.pts_flags = [True]*self.patchstar_num
+            config_lu.show_result = False
+            start_live_update(self, config_lu)
+            print('--------return at line 366')
+            return False, "None PatchStar Move Detected."
+            
+        self.patchstar_list_coordinates[max_moved_idx] = [  self.patchstar_list[max_moved_idx].x,
+                                                            self.patchstar_list[max_moved_idx].y,
+                                                            self.patchstar_list[max_moved_idx].z,
+                                                            self.patchstar_list[max_moved_idx].a]
+
+        print("User Moves PatchStar-{} to Coordinates: {}, {}, {}, {}".format(  max_moved_idx,
+                                                                                self.patchstar_list[max_moved_idx].x,
+                                                                                self.patchstar_list[max_moved_idx].y,
+                                                                                self.patchstar_list[max_moved_idx].z,
+                                                                                self.patchstar_list[max_moved_idx].a))
+
+        for idx in range(self.patchstar_num):
+            if not self.patchstar_list_coordinates[idx]:
+                #Move probe away in the max x and z directions
+                self.patchstar_list[idx].moveAbsolute(  self.patchstar_list[idx].x_max,
+                                                        self.patchstar_list[idx].y_origin,
+                                                        self.patchstar_list[idx].z_max)
+            else:
+                #Move probe away in the max x and z directions
+                self.patchstar_list[idx].moveAbsolute(  self.patchstar_list[idx].x_max,
+                                                        self.patchstar_list_coordinates[idx][1],
+                                                        self.patchstar_list[idx].z_max)
+        end_live_update(self)
+        config_lu = LiveUpdateConfig()
+        config_lu.sls_flag = True
+        config_lu.pts_flags = [True]*self.patchstar_num
+        config_lu.show_result = False
+        start_live_update(self, config_lu)
+        return True, []
+
+    def pst_probe_adjustment(self):
+        for idx in range(self.patchstar_num):
+            if not self.patchstar_list_coordinates[idx]:
+                return False, "PatchStar-{} Position Adjustment not Successful.".format(idx)
+        return True, []
 
     def calibrate(self):
 
@@ -341,6 +458,7 @@ class SP:
     def low_mag_cal(self):
 
         end_live_update(self)
+        self.cam.set_exp_time(self.low_mag_cal_exp_time)
 
         for idx in range(self.patchstar_num):
             self.patchstar_curr_idx = idx
@@ -531,6 +649,7 @@ class SP:
     def high_mag_cal(self, pts_index=0):
 
         end_live_update(self)
+        self.cam.set_exp_time(self.high_mag_cal_exp_time)
 
         self.patchstar_curr_idx = pts_index
 
@@ -679,22 +798,19 @@ class SP:
 
         return slct_coord
 
-    def select_target_cells(self):
+    def select_target_cells(self, screen_coords):
+        end_live_update(self)
         
-        #Prompt user to place sample into chamber, switch to High Magnification, and select target cells to patch
-        for idx in range(self.patchstar_num):
-            
-            input(f'Manually move slicescope over target cell{idx}. Press ENTER when finished. ')
+        self.slicescope.coordinates()
+        config_lu = LiveUpdateConfig()
+        config_lu.sls_flag = False
+        config_lu.pts_flags = [False]*self.patchstar_num
+        config_lu.cross = screen_coords
+        start_live_update(self, config_lu)
 
-            #Save coordinates into target list
-            self.slicescope.coordinates()
-            self.target_list.append([self.slicescope.x, self.slicescope.y, self.slicescope.z])
-
-        #Determine which probe will be optimum to patch target cell. 
-        #Perform 3D scan of the cell at these positions to find optimum target location for smart patching trajectory
-
-        for idx in range(self.patchstar_num):
-            self.slicescope.moveAbsolute(self.target_list[idx][0],self.target_list[idx][1],self.target_list[idx][2])
+        cam_xy_sls_z = Point([screen_coords[0], screen_coords[1], self.slicescope.z])
+        pts_to_move = cam_xy_sls_z.trans_3d(self.patchstar_list[pts_index].cam2pts_high_3d["tran_xyz"], self.patchstar_list[pts_index].cam2pts_high_3d["org"])
+        self.target_list.append(pts_to_move)
 
     def guess_screen_coord(self):
 
@@ -1093,7 +1209,7 @@ def main():
     #for port, desc, hwid in sp.list_port_info:
     #    print(f"{port}: {desc} [{hwid}]")
     #Initialize all of the equipment
-    sp.initialize(['COM4', 'COM5', 'COM8', 'COM9'])
+    sp.initialize(['COM3', 'COM4', 'COM7', 'COM8'])
     #sp.initialize()
     #Initial configuration
     #sp.configure()
