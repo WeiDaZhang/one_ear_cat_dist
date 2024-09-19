@@ -339,7 +339,7 @@ class SP:
         config_lu = LiveUpdateConfig()
         config_lu.sls_flag = False
         config_lu.pts_flags = [False]*self.patchstar_num
-        config_lu.show_result = True
+        config_lu.show_result = False
         start_live_update(self, config_lu)
 
         #Update each patchstar x,y,z,a coordinates
@@ -365,7 +365,7 @@ class SP:
             start_live_update(self, config_lu)
             print('--------return at line 366')
             return False, "None PatchStar Move Detected."
-            
+
         self.patchstar_list_coordinates[max_moved_idx] = [  self.patchstar_list[max_moved_idx].x,
                                                             self.patchstar_list[max_moved_idx].y,
                                                             self.patchstar_list[max_moved_idx].z,
@@ -456,14 +456,17 @@ class SP:
         #self.condenser.moveAbsolute(self.condenser.z_origin)
 
     def low_mag_cal(self):
-
-        end_live_update(self)
         self.cam.set_exp_time(self.low_mag_cal_exp_time)
-
         for idx in range(self.patchstar_num):
             self.patchstar_curr_idx = idx
             print("Start Patchstar {} Calibration".format(idx))
 
+            end_live_update(self)
+            config_lu = LiveUpdateConfig()
+            config_lu.sls_flag = False
+            config_lu.pts_flags = [False]*self.patchstar_num
+            config_lu.show_result = False
+            start_live_update(self, config_lu)
             # Move Slicescope to pre-set location
             self.slicescope.moveAbsolute(   self.patchstar_list_slicescope_coordinates[idx][0],
                                             self.patchstar_list_slicescope_coordinates[idx][1],
@@ -473,17 +476,22 @@ class SP:
             self.patchstar_list[idx].moveAbsolute(  self.patchstar_list_coordinates[idx][0],
                                                     self.patchstar_list_coordinates[idx][1],
                                                     self.patchstar_list_coordinates[idx][2])
+            end_live_update(self)
             #Find tip algorithms
             probe_Z_search(self, show_result=False)
 
 
             if not coarse_tip_XY_search(self, show_result=False):
-                input("!!!!!!!!!! Coarse tip XY search failed. Check what happened! !!!!!!!!!!")
+                err_msg = "Coarse tip XY search failed. Check what happened!"
+                print(err_msg)
+                return False, err_msg
 
             print('---------- Coarse tip XY search complete. ----------')
 
             if not fine_3d_tip_search(self, show_result=False):
-                input("!!!!!!!!!! Fine 3d tip search failed. Check what happened! !!!!!!!!!!")
+                err_msg = "Fine 3d tip search failed. Check what happened!"
+                print(err_msg)
+                return False, err_msg
 
             print('---------- Fine 3d tip search complete. ----------')
 
@@ -493,22 +501,38 @@ class SP:
             fine_pts2cam(self)
             print('---------- Fine patchstar -> camera coordinate transform complete. ----------')
 
-            tip_z_found = pts2slsZ(self, show_result=False)
+            if not pts2slsZ(self, show_result=False):
+                err_msg = "Patchstar -> Slicescope Z Cal failed. Check what happened!"
+                print(err_msg)
+                return False, err_msg
             print('---------- Patchstar -> Slicescope Z coordinate transform complete. ----------')
-            input("---------- Tip Found: {}?".format(tip_z_found))
+            print("Finish Patchstar {} Calibration".format(idx))
 
+            config_lu = LiveUpdateConfig()
+            config_lu.sls_flag = False
+            config_lu.pts_flags = [False]*self.patchstar_num
+            config_lu.show_result = False
+            start_live_update(self, config_lu)
             self.patchstar_list[idx].moveAbsolute(  self.patchstar_list[idx].x_max,
                                                     self.patchstar_list_coordinates[idx][1],
                                                     self.patchstar_list[idx].z_max)
+        return True, []
 
     def medium_level_cal(self, pts_index = 0):
 
         end_live_update(self)
+        config_lu = LiveUpdateConfig()
+        config_lu.sls_flag = False
+        config_lu.pts_flags =  [False]*self.patchstar_num
+        config_lu.show_result = False
+        config_lu.cross = self.high_mag_centre_on_low_mag
+        start_live_update(self, config_lu)
 
         self.patchstar_curr_idx = pts_index
         
         #Move patchstar{idx} to high mag center on low mag (x,y), low_mag_water_z_coord. Use pts2slsZ transformation to calculate low_mag_water_coord for each patchstar.
         move_tip_2_high_mag_centre_on_low_mag(self, show_result=False)
+        end_live_update(self)
 
         touch_water = low_mag_touch_water(self, show_result=False)
 
@@ -545,68 +569,6 @@ class SP:
                                                     self.patchstar_list[pts_index].z_max)
 
             return
-
-            #Move condenser back to original position
-            self.condenser.moveAbsolute(self.condenser.z_origin)
-
-            while True:
-
-                #High Mag fine tip search Z and XY
-
-                answer1 = input('---------- Put sample in chamber? ').lower()
-
-                if not answer1:
-                    continue
-                elif answer1.startswith('n'):
-
-                    while True:
-                        answer2 = input('---------- Switch to High Magnification? ').lower()
-
-                        if not answer2:
-                            continue
-                        elif answer2.startswith('n'):
-                            break
-                        elif answer2.startswith('y'):
-                            input('---------- Press [enter] when High Magnification is ready')
-                            break
-                        else:
-                            print('Enter yes or no.')
-
-                elif answer1.startswith('y'):
-
-                    #Move probe away in the max a direction
-                    self.patchstar_list[idx].approachAbsolute(self.patchstar_list[idx].a_max)
-
-                    config_lu = LiveUpdateConfig()
-                    config_lu.sls_flag = False
-                    config_lu.pts_flags =  [False]*self.patchstar_num
-                    config_lu.cross = self.high_mag_centre_on_low_mag
-                    start_live_update(self, config_lu)
-
-                    while True:
-                        answer3 = input('Is the sample at the correct location? ')
-
-                        if not answer3:
-                            continue
-                        elif answer3.startswith('n'):
-                            print(' Fix it!!!')
-                            continue
-                        elif answer3.startswith('y'):
-
-                            self.slicescope.moveAbsolute(sls_touch_water_coord[0],sls_touch_water_coord[1],sls_touch_water_coord[2])
-                            self.patchstar_list[idx].moveAbsolute(pts_touch_water_coord[0],pts_touch_water_coord[1],pts_touch_water_coord[2])
-
-                            input('Press [enter] to continue.')
-
-                            end_live_update(self)
-
-                            break
-                        else:
-                            print('Enter yes or no.')
-
-                else:
-                    print('Enter yes or no.')
-
 
     def place_sample_switch_high_mag(self):
         end_live_update(self)
@@ -800,7 +762,8 @@ class SP:
 
     def select_target_cells(self, screen_coords):
         end_live_update(self)
-        
+        pts_index = self.patchstar_curr_idx
+
         self.slicescope.coordinates()
         config_lu = LiveUpdateConfig()
         config_lu.sls_flag = False
