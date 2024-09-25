@@ -25,6 +25,7 @@ from distance_from_focus import *
 from threshold_edge_contour import *
 from probe_search import *
 from live_update_funcs import *
+from collections import deque
 
 import time
 import random
@@ -74,7 +75,9 @@ class SP:
         self.high_mag_magnification = 40
         self.low_mag_magnification = 4
 
-        self.gui_img_stack = []
+        #self.gui_img_stack = []
+        self.density_calc = False
+        self.gui_img_stack = deque()    #seems just that?
         self.gui_patchstar_coordinates = []
         self.gui_slicescope_coordinates = []
         self.gui_img_burst_interval = 50    #milliseconds
@@ -570,6 +573,35 @@ class SP:
 
             return
 
+    def pre_place_sample(self):
+        end_live_update(self)
+        config_lu = LiveUpdateConfig()
+        config_lu.sls_flag = False
+        config_lu.pts_flags =  [False]*self.patchstar_num
+        config_lu.cross = self.high_mag_centre_on_low_mag
+        config_lu.show_result = False
+        start_live_update(self, config_lu)
+
+    def gui_pst_switch_high_mag(self):
+        end_live_update(self)
+        config_lu = LiveUpdateConfig()
+        config_lu.sls_flag = False
+        config_lu.pts_flags =  [False]*self.patchstar_num
+        config_lu.cross = True
+        config_lu.show_result = False
+        start_live_update(self, config_lu)
+
+        # Move condenser to high level to suit high mag
+        #self.condenser.moveAbsolute(self.condenser.z_origin)
+        # To Move High Mag Surface to Water Level
+        #sls_into_water_max_delta = self.low_mag_focal_plane_2_high_mag_surf + self.low_mag_focal_plane_2_high_mag_surf_margin
+        #sls_z_move_to = self.slicescope.low_mag_water_z_coord + int(sls_into_water_max_delta)
+        #self.slicescope.moveAbsolute(self.slicescope.x,self.slicescope.y,sls_z_move_to)
+        
+        # To Move Low Mag Focal Plane to Water Level
+        self.slicescope.moveAbsolute(self.slicescope.x,self.slicescope.y,self.slicescope.low_mag_water_z_coord)
+
+
     def place_sample_switch_high_mag(self):
         end_live_update(self)
 
@@ -762,18 +794,24 @@ class SP:
 
     def select_target_cells(self, screen_coords):
         end_live_update(self)
-        pts_index = self.patchstar_curr_idx
 
         self.slicescope.coordinates()
         config_lu = LiveUpdateConfig()
         config_lu.sls_flag = False
         config_lu.pts_flags = [False]*self.patchstar_num
         config_lu.cross = screen_coords
+        config_lu.show_result = False
         start_live_update(self, config_lu)
 
-        cam_xy_sls_z = Point([screen_coords[0], screen_coords[1], self.slicescope.z])
-        pts_to_move = cam_xy_sls_z.trans_3d(self.patchstar_list[pts_index].cam2pts_high_3d["tran_xyz"], self.patchstar_list[pts_index].cam2pts_high_3d["org"])
-        self.target_list.append(pts_to_move)
+        if screen_coords[0] < self.cam.size[1]/2:
+            pts_index = 0
+        else:
+            pts_index = 1
+
+        pts_z_to_move = (self.slicescope.z * self.patchstar_list[pts_index].sls2ptsZ[0]) + self.patchstar_list[pts_index].sls2ptsZ[1]
+        cam_xy_sls_z = Point([screen_coords[0], screen_coords[1]])
+        pts_to_move = cam_xy_sls_z.trans_2d(self.patchstar_list[pts_index].cam2pts["tran_xy"], self.patchstar_list[pts_index].cam2pts["org"])
+        self.patchstar_list[pts_index].moveAbsolute(pts_to_move.x, pts_to_move.y, pts_z_to_move)
 
     def guess_screen_coord(self):
 
