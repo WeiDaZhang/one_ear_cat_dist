@@ -64,8 +64,9 @@ def check_instrument_type(port_info, instrument_list):
             if ser.is_open:
                 print(f'Port: {ser.name} keeps replying with Error Code')
                 ser.close()
-        except serial.SerialTimeoutException:
-            print(f'{port_name} baud {baud_rate} did not work.')
+        except (serial.SerialTimeoutException, serial.serialutil.SerialException):
+            print(f'{port_name} can\'t be opened.')
+            break
     return 
 
 def check_scientifica_instruments():
